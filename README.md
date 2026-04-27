@@ -289,8 +289,6 @@ I built this with significant help from AI tools. The full conversations are in 
 
 **Cursor** was my primary IDE. I set up a `.cursorrules` file at the project root with the project context (architecture, tech stack, code style, what's in scope) so Cursor had persistent context across every prompt. This was the single highest-leverage decision in the whole build — without it, I would have spent the first sentence of every prompt re-explaining the project.
 
-**Claude (web)** I used for higher-level planning before writing code: thinking through architecture, picking the right risk-flag thresholds and citing them, deciding what to scope in vs. out, sketching the implementation plan in `IMPLEMENTATION_PLAN.md`. Claude also helped me understand FHIR specifics (Bundles, codings, value types) that I didn't know coming in.
-
 **My workflow looked like this:** vague exploratory prompt → see what Cursor wrote → run it → fix what was broken or weird → ask follow-up questions about anything I didn't understand → iterate. Some of my best prompt-log entries are from debugging — pasting an error and asking "why is this happening?" The AI tools accelerated my coding speed maybe 3–4x, but I had to override their suggestions in real ways: they sometimes invented FHIR field names that didn't exist, sometimes proposed structures that didn't match my project's pattern, and sometimes were just wrong about clinical thresholds (I cross-checked everything against the real ADA / ACC/AHA / KDIGO guidelines).
 
 The reflection in `prompts/reflection/reflection_prompts.md` goes into more detail on what worked and what didn't.
