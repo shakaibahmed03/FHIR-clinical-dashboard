@@ -1,391 +1,306 @@
-# Layer Health — Clinical Dashboard
+# Layer Health — Clinical Dashboard Prototype
 
-A full-stack clinical dashboard that ingests FHIR R4 patient data, applies rule-based risk evaluation, and generates AI-assisted summaries for clinicians.
+A lightweight clinical dashboard for primary care physicians. The clinician enters a patient ID and gets a unified view of the patient's demographics, conditions, recent observations, an AI-generated clinical summary, and color-coded risk flags grounded in real clinical guidelines.
 
-> **Stack:** Node.js · Express · TypeScript · React · Vite · Tailwind CSS · Groq (LLaMA 3.1) · FHIR R4 (HAPI)
-
----
-
-## Table of Contents
-
-1. [Quick Start](#quick-start)
-2. [Project Structure](#project-structure)
-3. [Design Decisions](#design-decisions)
-4. [Clinical Logic](#clinical-logic)
-5. [Production Architecture (Scaled)](#production-architecture-scaled)
-6. [API Contract](#api-contract)
-7. [Configuration](#configuration)
+Built as a take-home assignment for the Solutions Engineer Co-op role at Layer Health.
 
 ---
 
-## Quick Start
+## Quick Demo
 
-### Prerequisites
+Three example patient IDs cover the demo space:
 
-- **Node.js 20+** and **npm 10+**
-- A free **Groq API key** (optional — the app falls back to a deterministic rule-based summary if absent or rate-limited): <https://console.groq.com>
+| Patient ID | Patient | What they demonstrate |
+|---|---------|----------------------|
+| `demo-001` | Sarah Mitchell (33F) | Stable patient with normal vitals — clean baseline view, no risk flags |
+| `demo-002` | James Carter (57M) | Multiple moderate-severity risk flags (active hypertension + type 2 diabetes, elevated BP 132/86) |
+| `demo-003` | Maria Rodriguez (70F) | Critical case with high-severity flags (active MI + COPD, BP 156/98, HR 108, SpO₂ 88, fever 38.7°C) |
 
-### 1. Clone & install
+Type any of these IDs into the search bar to load that patient.
+
+---
+
+## Setup and Running Locally
+
+You need:
+- Node.js v20 or higher
+- npm v10 or higher
+
+### 1. Clone the repo
 
 ```bash
 git clone <repo-url>
 cd "layer health"
+```
 
-# Backend
+### 2. Set up the backend
+
+```bash
 cd backend
-npm install
-
-# Frontend
-cd ../frontend
 npm install
 ```
 
-### 2. Configure environment
-
-Create `backend/.env`:
+Create a `.env` file in `backend/` with the following:
 
 ```bash
-FHIR_BASE_URL=https://hapi.fhir.org/baseR4
 PORT=3001
 USE_MOCK_DATA=true
+FHIR_BASE_URL=https://hapi.fhir.org/baseR4
 GROQ_API_KEY=gsk_your_groq_key_here
 ```
 
-| Variable         | Purpose                                                                                       | Default                          |
-| ---------------- | --------------------------------------------------------------------------------------------- | -------------------------------- |
-| `PORT`           | Backend HTTP port                                                                             | `3001`                           |
-| `FHIR_BASE_URL`  | HAPI FHIR base URL (only used when `USE_MOCK_DATA=false`)                                     | `https://hapi.fhir.org/baseR4`   |
-| `USE_MOCK_DATA`  | `true` reads from `backend/src/mock-data/*.json`; `false` calls live HAPI FHIR                | `true`                           |
-| `GROQ_API_KEY`   | If set, summaries are AI-generated; otherwise the rule-based fallback runs silently           | unset                            |
+`GROQ_API_KEY` is optional — if you don't have one (or it fails), the app uses a deterministic rule-based summary fallback. Everything still works without the key. `USE_MOCK_DATA=true` reads patient data from the bundled FHIR-shaped JSON files; setting it to `false` switches to live HAPI FHIR.
 
-The frontend has its own `frontend/.env` (already created) with `VITE_API_BASE_URL=http://localhost:3001`.
-
-### 3. Run both servers
-
-In two terminals:
+Then start the server:
 
 ```bash
-# Terminal 1 — backend (hot-reload via ts-node-dev)
-cd backend && npm run dev
-# → Server running on http://localhost:3001
-
-# Terminal 2 — frontend (Vite)
-cd frontend && npm run dev
-# → http://localhost:5173 (or 5174 if 5173 is busy)
+npm run dev
 ```
 
-### 4. Open the app
-
-Browse to the frontend URL and search any of the demo patient IDs:
-
-| ID         | Profile                                                                            | Expected risk flags                  |
-| ---------- | ---------------------------------------------------------------------------------- | ------------------------------------ |
-| `demo-001` | 33F, no conditions, normal vitals                                                  | none                                 |
-| `demo-002` | 57M, active hypertension + type 2 diabetes, BP 132/86                              | 1 MEDIUM observation + 2 conditions  |
-| `demo-003` | 70F, active MI + COPD (resolved HTN ignored), BP 156/98, HR 108, SpO₂ 88, temp 38.7 | 4 HIGH + 2 MEDIUM                    |
-
-Or hit the API directly:
+The backend now runs on `http://localhost:3001`. You can verify with:
 
 ```bash
-curl -s http://localhost:3001/api/patients/demo-002/dashboard | jq .
+curl http://localhost:3001/health
 ```
 
-### 5. (Optional) Switch to live HAPI FHIR
+You should see `{"status":"ok"}`.
 
-Set `USE_MOCK_DATA=false` in `backend/.env`, restart the backend, then search any real HAPI patient ID (e.g. `592924`). All other code stays unchanged — only `fhirClient.ts` swaps its data source.
+### 3. Set up the frontend (in a new terminal)
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+The frontend runs on `http://localhost:5173`. Open that URL in your browser, type one of the demo patient IDs (`demo-001`, `demo-002`, or `demo-003`) into the search bar, and you'll see the dashboard load. (If port 5173 is already in use, Vite will pick the next free port — check the terminal for the exact URL.)
+
+### 4. Stopping
+
+`Ctrl+C` in each terminal stops the respective server.
 
 ---
 
-## Project Structure
+## What's In Each Folder
 
 ```
 layer health/
-├── README.md                          # ← this file
-├── ARCHITECTURE.md                    # detailed architecture doc
-├── IMPLEMENTATION_PLAN.md             # build plan + verification steps
-│
-├── backend/
-│   └── src/
-│       ├── index.ts                   # Express entry point
-│       ├── routes/
-│       │   └── patients.ts            # GET /api/patients/:id/dashboard
-│       ├── services/
-│       │   ├── fhirClient.ts          # mock JSON OR live HAPI (toggled by USE_MOCK_DATA)
-│       │   ├── transformer.ts         # raw FHIR → clean dashboard types
-│       │   ├── riskRules.ts           # pure sync rule evaluator → RiskFlag[]
-│       │   └── summary.ts             # Groq LLM + rule-based fallback
-│       ├── mock-data/
-│       │   ├── patients.json          # FHIR R4 Patient resources
-│       │   ├── conditions.json        # FHIR R4 Condition bundles
-│       │   └── observations.json      # FHIR R4 Observation bundles
-│       └── types/
-│           ├── fhir.ts                # raw FHIR resource shapes
-│           └── dashboard.ts           # clean output types
-│
-└── frontend/
-    └── src/
-        ├── main.tsx
-        ├── App.tsx                    # state + composition
-        ├── services/api.ts            # fetchDashboard(id)
-        ├── types/dashboard.ts         # mirrors backend dashboard types
-        └── components/
-            ├── SearchBar.tsx
-            ├── DemographicsPanel.tsx
-            ├── ConditionsList.tsx
-            ├── ObservationsList.tsx
-            ├── AISummaryBox.tsx
-            └── RiskFlagsSection.tsx
+├── backend/              Node + Express + TypeScript API server (port 3001)
+│   └── src/mock-data/    FHIR R4 demo patients, conditions, observations
+├── frontend/             React + Vite + Tailwind dashboard (port 5173)
+├── prompts/              AI tool conversations from while building
+├── ARCHITECTURE.md       Detailed architecture notes
+├── IMPLEMENTATION_PLAN.md  Build plan + verification steps
+└── README.md             This file
 ```
 
 ---
 
 ## Design Decisions
 
-### Tech Stack Rationale
+I'm a student building this in a tight time budget, so every decision below is about trading complexity for time without giving up the things that matter — clean architecture, real clinical reasoning, and a working demo.
 
-| Choice                         | Why                                                                                                                                                |
-| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **TypeScript everywhere**      | The same `dashboard.ts` types are mirrored on both sides — the wire format is statically checked end-to-end. No `any` allowed in the codebase.     |
-| **Express on Node.js**         | Minimal, well-understood, easy to deploy. The work is mostly I/O fan-out + transformation, not heavy compute, so Node's event loop is a good fit.  |
-| **Vite + React 19**            | Sub-second HMR and a tiny dev footprint. React for the component model; no framework lock-in beyond that.                                          |
-| **Tailwind CSS**               | Utility-first lets clinical UI stay consistent (typography, spacing, severity colors) without bespoke CSS. No design system overhead.              |
-| **Groq (LLaMA 3.1)**           | Free tier, very low latency (sub-500ms summaries), drop-in OpenAI-compatible client. Critical: **summary failures never block the response.**       |
-| **FHIR R4 + HAPI**             | Industry standard. Mock data is authored as real FHIR resources so swapping back to live HAPI is a one-line config change.                         |
-| **No database**                | The system is a stateless aggregator over an external system of record (FHIR). Adding a DB would shift the source of truth — out of scope.         |
+### Tech stack
 
-### Backend → Frontend Communication
+**React + Vite + Tailwind for the frontend.** Vite spins up instantly and Tailwind lets me style without writing custom CSS. Both are widely used and fast for prototyping. I picked them because I've used them in school projects and at my current internship, so I could move fast.
 
-A **single aggregation endpoint** instead of one endpoint per FHIR resource:
+**Node + Express + TypeScript for the backend.** Express is minimal, gets out of the way, and lets me focus on the logic. TypeScript gives me type safety on the data shapes, which matters a lot when you're transforming messy healthcare data. I considered NestJS (which I use at my current internship at Steady State Health) but decided it was overkill for a 3-hour prototype — the framework's boilerplate would have eaten 30+ minutes I could spend on the actual features.
 
-```
-GET /api/patients/:id/dashboard
-   ↳ returns { patient, conditions[], observations[], summary, flags[] }
-```
+**No database.** Patient data is read on-demand from FHIR-shaped JSON files. In production, you'd swap the file reads for FHIR API calls (more on that below). I deliberately didn't add a caching layer for the prototype — the file reads are already in-process, so caching them buys nothing. Production would put Redis in front of real FHIR endpoints, where the latency actually matters.
 
-| Trade-off                            | Decision                                                                                                                                                          |
-| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| One round trip vs three              | One. The frontend is simple; loading states, error handling, and partial-failure logic all collapse into a single `try/catch`.                                    |
-| Server-side fan-out vs client-side   | Server. The backend issues 3 parallel FHIR calls via `Promise.all`. From a clinician's browser (potentially over hospital Wi-Fi) this is much faster than 3 HTTP hops. |
-| Where to compute risk flags          | Server, in a pure sync function (`riskRules.ts`). Rules live in config arrays, not branching logic — adding a new threshold is a one-line change.                 |
-| Where the LLM call lives             | Server. Keeps the API key off the client and lets us guarantee a fallback if Groq is down.                                                                        |
+**Groq (`llama-3.1-8b-instant`) for the AI summary** with a deterministic rule-based fallback. Groq is cheap, very fast (sub-second), and good enough for short clinical narratives. The fallback exists because I shouldn't trust an external service to never fail — if Groq is down, rate-limited, or no API key is configured, the dashboard still works with a slightly less elegant summary. The summary service is wrapped so it never throws.
 
-### Service Chain (single-responsibility per file)
+### How the components communicate
 
-```
-fhirClient → transformer → riskRules → summary
-   raw         clean         sync          AI/fallback
-```
+The frontend makes one HTTP request to the backend (`GET /api/patients/:id/dashboard`) and gets one consolidated JSON response back. The backend orchestrates everything internally — it fetches patient data, conditions, and observations, runs them through a transformer to clean up the FHIR shapes, computes risk flags, generates the AI summary, and bundles it all into one clean response.
 
-- `fhirClient.ts` — **only** file that reads patient data. Either pulls from `mock-data/*.json` or makes axios calls to HAPI. Same return signatures either way, so the rest of the chain is source-agnostic.
-- `transformer.ts` — defensively maps FHIR (which is full of optional fields) to clean types. Every nested access uses optional chaining + a fallback.
-- `riskRules.ts` — pure, sync, no I/O. Easy to unit-test, easy to extend.
-- `summary.ts` — calls Groq; on **any** failure (network, rate limit, malformed response) silently falls back to a rule-based summary. The summary endpoint never throws.
+This is sometimes called the **adapter pattern** or **backend-for-frontend** pattern. The whole point is that the frontend never has to know what FHIR looks like or where the data comes from. If we swapped the data source from mock files to a real EHR's FHIR API tomorrow, the frontend code wouldn't change at all.
+
+### Mock data instead of live HAPI FHIR
+
+I originally planned to use the [HAPI FHIR public test server](https://hapi.fhir.org/baseR4) — a free, public FHIR server commonly used for demos. I even wrote a script to score patients on the server by how much clinical data they had. But the public server is unreliable: slow response times, intermittent downtime, and patient records get wiped on a schedule. I didn't want a broken HAPI server to break my demo.
+
+So I generated **mock data in valid FHIR R4 format** — the same `Bundle` structure HAPI returns, with real LOINC and SNOMED codes. The transformer layer does the same FHIR adaptation work it would do against live HAPI. The switch is already wired in: `fhirClient.ts` checks the `USE_MOCK_DATA` env flag and dispatches to either the mock fetcher (file read) or the live HAPI fetcher (`axios.get`). The rest of the pipeline is unchanged either way.
+
+I designed three patients to cover the demo space: a stable patient (no flags), a moderate-severity patient (multiple flags fire), and a critical patient (high-severity flags). This way the demo shows the full range of what the system can do.
 
 ---
 
 ## Clinical Logic
 
-### Why these data points?
+The target user is a **primary care physician** seeing a patient in a 15–20 minute visit. They need to understand who the patient is and what's clinically concerning in the first 30 seconds. Everything in the dashboard is laid out around that need.
 
-The dashboard surfaces the **shortest possible context a clinician needs to triage a patient in under 30 seconds**:
+### Why these specific data points
 
-| Panel              | Why it's there                                                                                                                                                            |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Demographics**   | Identity confirmation. Age (computed from `birthDate`) is clinically relevant for almost every threshold (e.g. paediatric vs adult vitals).                                 |
-| **Risk Flags**     | The headline. A clinician should see "what's wrong with this patient right now" before reading anything else. Sorted HIGH → MEDIUM → LOW. Empty state is explicitly green. |
-| **AI Summary**     | A 2–3 sentence narrative the clinician can read aloud during handoff. Rule-based fallback ensures it's always present.                                                    |
-| **Conditions**     | Active diagnoses with onset dates. Resolved conditions are shown but visually de-emphasised (and are excluded from risk flagging).                                        |
-| **Observations**   | Most recent vitals with units. Currency matters more than completeness — the table is short, scannable, and value-aligned.                                                |
+| Section | Why it's there |
+|---------|----------------|
+| **Patient header** (name, age, gender, ID) | Confirms identity. The doctor needs to know who they're looking at before anything else makes sense. Age is computed from `birthDate` so age-dependent thresholds are easy to add later. |
+| **AI summary** at the top | A 2–3 sentence narrative that tells the doctor "here's what matters" before they scan the rest. Mimics how a colleague would brief them in 10 seconds. |
+| **Risk flags** with color coding | Visual triage — red is urgent, amber is "needs attention this visit," green means under control. Lets the eye land on what's wrong without reading. |
+| **Active conditions** | What chronic problems is this person managing? Drives the entire conversation. Filtered to active only — resolved diagnoses are noise. |
+| **Recent observations** | Latest vitals — BP, heart rate, O₂ saturation, temperature. The doctor needs to know what's current, not a six-month history. |
 
-### What the risk rules check
+### The risk-flag rules
 
-Threshold rules (LOINC-coded vitals):
+Risk flags are **deterministic** (rule-based, not AI). Clinical decision support has to be reliable and auditable — you can't have an LLM hallucinating that a patient has hypertension. So the rules are simple `if/else` thresholds in `riskRules.ts`, keyed by the LOINC and SNOMED codes the transformer extracts.
 
-| Code      | Vital                      | HIGH                | MEDIUM                |
-| --------- | -------------------------- | ------------------- | --------------------- |
-| `8480-6`  | Systolic BP                | > 140 mmHg          | 120–140 mmHg          |
-| `8867-4`  | Heart rate                 | > 100 bpm           | < 60 bpm              |
-| `2708-6`  | O₂ saturation              | < 90%               | 90–94%                |
-| `8310-5`  | Body temperature           | —                   | > 38.5 °C (fever)     |
+**Observation thresholds** (LOINC-coded vitals):
 
-Condition rules (SNOMED-coded, only if `clinicalStatus = active`):
+| Vital | LOINC | HIGH | MEDIUM | Source |
+|---|---|---|---|---|
+| Systolic BP | `8480-6` | > 140 mmHg | 120–140 mmHg | ACC/AHA 2017 Hypertension Guidelines (Stage 2 ≥140) |
+| Heart rate | `8867-4` | > 100 bpm | < 60 bpm | Standard adult vitals reference |
+| O₂ saturation | `2708-6` | < 90% | < 95% | Standard pulse oximetry reference (severe hypoxemia <90%) |
+| Body temperature | `8310-5` | — | > 38.5 °C | Standard fever threshold |
 
-| Code         | Condition                  | Severity |
-| ------------ | -------------------------- | -------- |
-| `22298006`   | Myocardial infarction      | HIGH     |
-| `38341003`   | Hypertension               | MEDIUM   |
-| `44054006`   | Type 2 diabetes mellitus   | MEDIUM   |
-| `73211009`   | Diabetes mellitus          | MEDIUM   |
-| `13645005`   | COPD                       | MEDIUM   |
+**Active condition flags** (SNOMED-coded; only fires if `clinicalStatus = active`):
 
-> **Resolved conditions are intentionally ignored** — `riskRules.checkConditions` filters on `status === "active"` so a patient with historical (but treated) hypertension does not generate a current flag. This matches how clinicians read a problem list.
+| Condition | SNOMED | Severity |
+|---|---|---|
+| Myocardial infarction | `22298006` | HIGH |
+| Hypertension | `38341003` | MEDIUM |
+| Type 2 diabetes mellitus | `44054006` | MEDIUM |
+| Diabetes mellitus | `73211009` | MEDIUM |
+| COPD | `13645005` | MEDIUM |
 
-### How this fits a clinical workflow
+> Resolved conditions are intentionally excluded from flagging — `riskRules.checkConditions` filters on `status === "active"` so a patient with historical (treated) hypertension doesn't generate a current flag.
 
-This dashboard is designed for the **chart-open glance** — the 10–30 seconds between a clinician clicking a patient's name and starting to talk to them.
+The AI summary, on the other hand, is allowed to be flexible — it generates plain-English narrative that summarizes everything for the doctor. But because it's an LLM, it's labeled as AI-generated and the deterministic rules are what the doctor can actually trust.
 
-1. **Triage at glance** — the right column is the risk panel. Severity-coloured cards mean a clinician sees red before they read anything.
-2. **Confirm context** — demographics + AI summary together answer "who is this and what's going on?"
-3. **Drill in** — conditions and observations tables provide the supporting detail the clinician needs to confirm or dismiss the flagged risks.
-4. **Resilience by default** — if the LLM is down or slow, the rule-based summary still appears; if HAPI returns a sparse record, every transformer falls back to safe defaults rather than crashing the page.
+### What I deliberately left out
 
-This is intentionally **not** a charting system, an order-entry system, or a longitudinal record viewer. Those are separate problems; this dashboard is a focused triage/handoff aid.
+A real PCP would also want medications, allergies, lab results (HbA1c, eGFR, lipids), recent encounters, and overdue preventive screenings. I scoped those to "future work" because the architecture cleanly supports adding them — they're just additional FHIR resources flowing through the same adapter, plus matching threshold rules in `riskRules.ts` (e.g. HbA1c > 9.0% from ADA Standards of Care, eGFR < 60 from KDIGO). The list is short and well-defined; the work is in the data plumbing, not the design.
 
 ---
 
-## Production Architecture (Scaled)
+## Architecture
 
-The current code is a single backend process talking to a single FHIR server. Here is how the same service chain would be deployed to support **thousands of concurrent clinicians** with the security and reliability a clinical environment demands.
+### Current architecture (the prototype)
 
-```mermaid
-flowchart TB
-    subgraph CL["Clinicians (browser)"]
-        U1[Clinician Workstation]
-        U2[Clinician iPad]
-    end
-
-    subgraph EDGE["Edge Layer"]
-        WAF[WAF + DDoS Protection]
-        CDN[CDN — static frontend assets]
-        APIGW[API Gateway<br/>auth, rate limit, mTLS]
-    end
-
-    subgraph IAM["Identity & Access"]
-        IDP[SSO / OIDC<br/>SMART-on-FHIR launch]
-        RBAC[Role + Patient<br/>scope policy engine]
-        AUDIT[(Audit log<br/>append-only / WORM)]
-    end
-
-    subgraph APP["Backend (stateless, horizontally scaled)"]
-        LB[Load Balancer]
-        API1[Dashboard API pod 1]
-        API2[Dashboard API pod 2]
-        API3[Dashboard API pod N]
-    end
-
-    subgraph CACHE["Caching & Resilience"]
-        REDIS[(Redis<br/>per-patient response cache<br/>TTL 30–60s)]
-        CB[Circuit breakers<br/>+ retries + timeouts]
-    end
-
-    subgraph DATA["Data Sources"]
-        EHR[(EHR FHIR Server<br/>Epic / Cerner / HAPI)]
-        TERM[(Terminology service<br/>LOINC / SNOMED)]
-    end
-
-    subgraph AI["AI Summary Path"]
-        SUM[Summary Service<br/>queue + worker]
-        LLM[LLM Provider<br/>HIPAA BAA in place]
-        FALLBACK[Rule-based fallback]
-    end
-
-    subgraph OBS["Observability"]
-        LOGS[(Structured logs<br/>PHI-redacted)]
-        METRICS[(Metrics + traces)]
-        ALERT[Alerting / on-call]
-    end
-
-    U1 --> WAF
-    U2 --> WAF
-    WAF --> CDN
-    WAF --> APIGW
-    APIGW --> IDP
-    IDP --> RBAC
-    RBAC --> APIGW
-    APIGW --> LB
-    APIGW -.->|every request| AUDIT
-    LB --> API1
-    LB --> API2
-    LB --> API3
-    API1 --> CB
-    API2 --> CB
-    API3 --> CB
-    CB --> REDIS
-    REDIS -.->|cache miss| EHR
-    CB --> EHR
-    CB --> TERM
-    API1 --> SUM
-    SUM --> LLM
-    SUM -.->|on failure| FALLBACK
-    API1 -.-> LOGS
-    API1 -.-> METRICS
-    METRICS --> ALERT
+```
+┌──────────────────────┐
+│  React Frontend      │
+│  (port 5173)         │
+└──────────┬───────────┘
+           │ One HTTP request:
+           │ GET /api/patients/:id/dashboard
+           ▼
+┌──────────────────────────────────────────────┐
+│  Express Backend (port 3001)                 │
+│                                              │
+│  routes/patients.ts  (orchestrator)          │
+│   ├─ services/fhirClient.ts   (mock or HAPI) │
+│   ├─ services/transformer.ts  (clean shapes) │
+│   ├─ services/riskRules.ts    (risk flags)   │
+│   └─ services/summary.ts      (Groq + fallback)
+│                                              │
+└──────────────────┬───────────────────────────┘
+                   │
+        ┌──────────┴──────────────┐
+        ▼                         ▼
+┌────────────────────┐   ┌────────────────────┐
+│  Mock FHIR R4      │   │  Groq API          │
+│  JSON (default)    │   │  llama-3.1-8b-     │
+│  or live HAPI      │   │  instant           │
+│  (USE_MOCK_DATA)   │   │                    │
+└────────────────────┘   └────────────────────┘
 ```
 
-### What changes vs. the current code
+### How this would scale to thousands of clinicians
 
-| Concern              | Today                                  | Production                                                                                                                |
-| -------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| **Auth**             | Open (CORS only)                       | OIDC / **SMART-on-FHIR** launch context. Every request carries a clinician identity + patient scope claim.                 |
-| **Authorization**    | None                                   | Policy engine (e.g. OPA) checks "may this clinician see this patient?" against a role + relationship matrix.              |
-| **Network**          | Localhost                              | Edge: WAF + DDoS, mTLS between gateway and services, private VPC, no public ingress to the FHIR layer.                    |
-| **Audit**            | None                                   | Every read is audited (clinician, patient, timestamp, IP) to an append-only / WORM store — required by HIPAA `§164.312`. |
-| **Scaling**          | One process                            | Stateless API pods behind a load balancer. HPA scales on CPU + p95 latency. Zero session affinity needed.                 |
-| **FHIR latency**     | 3 round trips per request              | Same fan-out, but with a per-patient **Redis cache** (30–60s TTL) — drops most clinician click-to-render to single-digit ms. |
-| **Resilience**       | Inline `try/catch`                     | Circuit breakers + bounded retries + per-call timeouts on FHIR and LLM. The rule-based summary becomes a real failover.    |
-| **LLM**              | Direct synchronous call to Groq        | Provider with a signed HIPAA BAA. Optional async path via a queue if response time matters less than throughput.          |
-| **PHI in logs**      | Possible (we log errors verbatim)      | Structured logging with PHI redaction at the logger; correlation IDs tie a request across services without leaking names.  |
-| **Observability**    | Console logs                           | Metrics (RED), traces (OpenTelemetry), error tracking (Sentry), alerts on FHIR error rate, LLM error rate, p95 latency.    |
-| **Deployment**       | `npm run dev`                          | Container images, immutable releases, blue/green or canary deploys, infra as code (Terraform / Pulumi).                     |
-| **Compliance**       | —                                      | HIPAA technical safeguards, SOC 2 controls, encryption at rest (KMS) + in transit (TLS 1.3), regular access reviews.       |
+If this were a real product serving thousands of physicians across many hospitals, the architecture would extend in fairly standard ways. I haven't built any of this in the prototype — it's intentionally out of scope — but here's how the same shape grows up:
 
-The **service chain itself does not change** — `fhirClient → transformer → riskRules → summary` is identical in production. That's the point of keeping each file single-purpose: every concern above is added at the edges, not by rewriting the business logic.
+**Frontend layer**
+- Static frontend assets served from a CDN (CloudFront, Vercel, etc.) close to clinicians for fast loads
+- The frontend code itself wouldn't change — same React app, just deployed to a CDN instead of `npm run dev`
+
+**Backend layer**
+- The Express backend runs as **stateless containers** behind a load balancer
+- Container orchestration (Kubernetes, AWS ECS) handles scaling — more pods spin up under load, fewer pods scale down at off-hours
+- "Stateless" matters here: any pod can serve any request, because no per-user state lives in memory. The current backend already has this property — there's nothing to undo.
+
+**Caching layer**
+- A **Redis cluster** in front of the FHIR client, shared across all backend pods, keyed by patient ID
+- All pods read from and write to the same Redis, so a cache hit on one pod helps every other pod
+- TTLs are configurable per care setting — much shorter for ICU contexts (where data must be fresh), longer for routine outpatient
+- I left this out of the prototype on purpose: caching in-process file reads is pointless. Caching only earns its complexity once you're paying real network cost for FHIR.
+
+**Data layer (real EHR integration)**
+- The mock FHIR JSON files get replaced with real EHR FHIR endpoints (Epic, Cerner, etc.)
+- Authentication uses **SMART on FHIR / OAuth2** — when the clinician logs in, the app gets a scoped access token tied to their identity and their permissions
+- The `fhirClient.ts` adapter pattern means this swap is mostly contained — the rest of the backend doesn't change
+
+**Authentication and authorization**
+- Single sign-on with the hospital's identity provider (Okta, Azure AD)
+- Role-based access control — different clinicians see different views (PCPs see comprehensive, specialists see filtered)
+- Short idle timeouts (15 minutes is standard for clinical contexts)
+
+**Audit and compliance**
+- Every patient access logged to a **PostgreSQL audit database** with clinician ID, patient ID, timestamp, accessed fields, and IP
+- HIPAA requires this — you have to be able to answer "who looked at this patient's record on which date?"
+- All traffic over TLS, all data at rest encrypted, all infrastructure on HIPAA-eligible cloud services with a Business Associate Agreement (BAA)
+
+**Resilience**
+- Retries with exponential backoff on FHIR calls (not in the prototype — would be added)
+- **Circuit breakers** — if a downstream EHR is failing repeatedly, stop hammering it for a cooldown period
+- **Stale-while-revalidate** caching — serve stale cached data with a warning if the live source is down, rather than failing the whole dashboard
+- Switch from `Promise.all` to `Promise.allSettled` so one failed sub-fetch (e.g. observations) doesn't kill the whole dashboard
+
+**Observability**
+- Structured logging from every backend pod → centralized log aggregator (Datadog, CloudWatch)
+- Metrics on cache hit rate, FHIR latency, AI summary failure rate
+- Alerts on anomalies (sudden spike in FHIR errors, Groq failures crossing a threshold)
+
+The prototype carries the *shape* of these patterns even where it doesn't implement the production version — the AI summary fallback is real, the type-safe contract between backend and frontend is real, the safe FHIR field-access patterns in the transformer are real. The hardening (cache, retries, circuit breakers, partial-failure tolerance) is what gets added at the edges. The clinical logic underneath stays the same.
 
 ---
 
-## API Contract
+## Trade-offs and What I'd Do Next
 
-Single endpoint:
+I want to be honest about what I cut and why.
 
-```
-GET /api/patients/:id/dashboard
-```
+**Cut for time:**
+- Authentication / authorization (a real product needs SMART-on-FHIR, RBAC, audit logging — but that's hours of work for a 3-hour prototype)
+- Medications, allergies, procedures (the architecture supports them; just more FHIR resources flowing through the same adapter)
+- USPSTF preventive screening rules (colon, breast, cervical) — these need encounter and procedure history, which I didn't fetch
+- Streaming AI summary (would feel snappier in production, but adds complexity I didn't need for a demo)
+- Tests (a real codebase needs unit tests for the transformer and risk rules, integration tests for the routes)
+- Production-quality error handling (the prototype handles the common cases but isn't bulletproof)
 
-**Response (200 OK):**
+**What I'd do with another day:**
+- Add medications and allergies — both are critical clinical context I'd want in front of a doctor
+- HbA1c and eGFR observations + matching risk rules (ADA, KDIGO citations) — the rule engine and transformer already accept new LOINC codes; just need the data and two more `OBSERVATION_RULES` entries
+- A real cache layer (in-memory with TTL is fine to start) for when `USE_MOCK_DATA=false` — file reads don't need it, but live HAPI calls do
+- Switch from `Promise.all` to `Promise.allSettled` in `fhirClient.ts` so one failed sub-fetch doesn't tank the whole dashboard
+- Unit tests for risk rules with sample observation inputs (these are pure functions, trivial to test)
+- Role-specific dashboards — a cardiologist's view filtered to cardiac data, a hospitalist's view emphasizing the last 24 hours
 
-```json
-{
-  "patient":      { "id", "name", "gender", "birthDate" },
-  "conditions":   [{ "id", "code", "display", "status", "onsetDate" }],
-  "observations": [{ "id", "code", "display", "value", "unit", "effectiveDate" }],
-  "summary":      "string — always present (AI-generated or rule-based fallback)",
-  "flags":        [{ "type", "severity", "message" }]
-}
-```
-
-- `severity` ∈ `"HIGH" | "MEDIUM" | "LOW"`
-- `flags` is always an array; `[]` means no risks detected.
-- `summary` is always a non-empty string.
-
-**Error responses:**
-
-| Status | Body                                 | Cause                          |
-| ------ | ------------------------------------ | ------------------------------ |
-| 400    | `{ "error": "Patient ID is required" }` | Missing `:id`                  |
-| 404    | `{ "error": "Patient {id} not found" }` | No matching FHIR Patient       |
-| 500    | `{ "error": "Failed to fetch patient dashboard" }` | Upstream FHIR or other failure |
-
-Health probe:
-
-```
-GET /health  →  { "status": "ok" }
-```
+**What I'd do with a real engineering team:**
+- Proper SMART-on-FHIR auth flow against a sandboxed Epic instance
+- Streaming AI summary with Server-Sent Events
+- Real-time alerts for critical lab values (push notifications when something crosses a threshold)
+- Integration with the hospital's EHR write-back so a clinician can mark something as reviewed
 
 ---
 
-## Configuration
+## AI Tooling Disclosure
 
-| File                                | Purpose                                              |
-| ----------------------------------- | ---------------------------------------------------- |
-| `backend/.env`                      | Backend secrets + flags (gitignored)                 |
-| `frontend/.env`                     | `VITE_API_BASE_URL` for the frontend (gitignored)    |
-| `backend/src/mock-data/*.json`      | Demo FHIR resources used when `USE_MOCK_DATA=true`   |
-| `backend/src/services/riskRules.ts` | Threshold + condition rules (config arrays)          |
+I built this with significant help from AI tools. The full conversations are in the `/prompts` folder.
 
-To add a new clinical rule, edit the `OBSERVATION_RULES` or `CONDITION_RULES` arrays in `riskRules.ts` — no other file needs to change.
+**Cursor** was my primary IDE. I set up a `.cursorrules` file at the project root with the project context (architecture, tech stack, code style, what's in scope) so Cursor had persistent context across every prompt. This was the single highest-leverage decision in the whole build — without it, I would have spent the first sentence of every prompt re-explaining the project.
+
+**Claude (web)** I used for higher-level planning before writing code: thinking through architecture, picking the right risk-flag thresholds and citing them, deciding what to scope in vs. out, sketching the implementation plan in `IMPLEMENTATION_PLAN.md`. Claude also helped me understand FHIR specifics (Bundles, codings, value types) that I didn't know coming in.
+
+**My workflow looked like this:** vague exploratory prompt → see what Cursor wrote → run it → fix what was broken or weird → ask follow-up questions about anything I didn't understand → iterate. Some of my best prompt-log entries are from debugging — pasting an error and asking "why is this happening?" The AI tools accelerated my coding speed maybe 3–4x, but I had to override their suggestions in real ways: they sometimes invented FHIR field names that didn't exist, sometimes proposed structures that didn't match my project's pattern, and sometimes were just wrong about clinical thresholds (I cross-checked everything against the real ADA / ACC/AHA / KDIGO guidelines).
+
+The reflection in `prompts/reflection/reflection_prompts.md` goes into more detail on what worked and what didn't.
 
 ---
 
-## License
+## A Note On Where This Prototype Stops
 
-Proprietary — Layer Health.
+This is a **prototype**, not production code. It doesn't have authentication, HIPAA controls, real EHR integration, or test coverage. I made these omissions deliberately because the take-home is 2–3 hours of work and the goal is demonstrating engineering judgment on architecture, clinical reasoning, and AI collaboration — not building a hospital-grade product.
+
+If a Layer Health engineer wanted to extend this into something real, the boundaries are clean: the adapter pattern in the backend means data sources can be swapped without touching the frontend, the risk-rules module is pure functions easy to unit-test and extend, and the AI summary has both a real-LLM path and a fallback so it's never a single point of failure. The shape is meant to grow.
+
+Thanks for reviewing this — happy to walk through any part of it in the follow-up.
