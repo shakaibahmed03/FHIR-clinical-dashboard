@@ -63,3 +63,22 @@ Can you help me define simple rules and how to structure this in code?
 ```
 
 **Result:** Designed `riskFlagEngine.ts` as a pure utility with typed flags (severity + message). Flags added to `DashboardResponse`.
+
+---
+
+## Switching from Live HAPI FHIR to Mock Data
+
+**Context:** Use when the live FHIR server is too unpredictable for a demo, but you want to keep the data adapter doing real FHIR transformation work so a swap back is trivial.
+**Prompt:**
+
+```
+i'm switching from live HAPI FHIR to mock data for reliability, the public HAPI server
+is too unpredictable for a demo. but i want to keep my mock data in valid FHIR R4 format
+so my fhir-transformer logic still does real FHIR adaptation work. that way swapping to
+live HAPI later would only mean changing my fhir client to make HTTP calls instead of
+reading from disk.
+
+create three files in backend/src/mock-data/:
+```
+
+**Result:** After clarifying the file split (one per FHIR resource type) and confirming three demo patients with distinct risk profiles, created `patients.json`, `conditions.json`, `observations.json` as FHIR R4 fixtures. Then swapped `fhirClient.ts` to dispatch via a `USE_MOCK_DATA` env flag (default `true`), keeping live HAPI fetchers intact. Zero diff to `transformer.ts`, `riskRules.ts`, `summary.ts`, or routes.
