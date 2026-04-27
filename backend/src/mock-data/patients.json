@@ -1,0 +1,38 @@
+{
+  "demo-001": {
+    "resourceType": "Patient",
+    "id": "demo-001",
+    "name": [
+      { "use": "official", "family": "Mitchell", "given": ["Sarah"] }
+    ],
+    "gender": "female",
+    "birthDate": "1992-04-15",
+    "telecom": [
+      { "system": "email", "value": "sarah.mitchell@example.com" }
+    ]
+  },
+  "demo-002": {
+    "resourceType": "Patient",
+    "id": "demo-002",
+    "name": [
+      { "use": "official", "family": "Carter", "given": ["James", "R"] }
+    ],
+    "gender": "male",
+    "birthDate": "1968-09-22",
+    "telecom": [
+      { "system": "phone", "value": "+1-555-0184" }
+    ]
+  },
+  "demo-003": {
+    "resourceType": "Patient",
+    "id": "demo-003",
+    "name": [
+      { "use": "official", "family": "Rodriguez", "given": ["Maria"] }
+    ],
+    "gender": "female",
+    "birthDate": "1955-11-03",
+    "telecom": [
+      { "system": "phone", "value": "+1-555-0276" }
+    ]
+  }
+}
