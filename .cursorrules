@@ -1,0 +1,69 @@
+# Layer Health — Clinical Dashboard
+
+## Architecture
+
+- **Frontend:** React + Tailwind CSS
+- **Backend:** Node.js, Express, TypeScript
+- **External APIs:**
+  - HAPI FHIR (`https://hapi.fhir.org/baseR4`) — patient data (Patient, Condition, Observation)
+  - Groq API — AI-generated patient summaries
+- **Pattern:** Backend acts as an adapter — fetches raw FHIR, transforms into a clean JSON contract for the frontend via a service chain: `fhirClient → transformer → riskRules → summary`
+
+## Project Structure
+
+```
+backend/src/
+├── index.ts              # Express entry point
+├── routes/patients.ts    # Single endpoint: GET /api/patients/:id/dashboard
+├── services/
+│   ├── fhirClient.ts     # Only file that talks to HAPI FHIR
+│   ├── transformer.ts    # Raw FHIR → clean dashboard types
+│   ├── riskRules.ts      # Rule-based risk flagging (sync, no AI)
+│   └── summary.ts        # Groq AI summary + rule-based fallback
+└── types/
+    ├── fhir.ts           # Raw FHIR resource shapes
+    └── dashboard.ts      # Clean output types (DashboardResponse, RiskFlag)
+
+frontend/src/
+├── App.tsx               # Root — owns state, renders panels
+├── components/           # SearchBar, DemographicsPanel, ConditionsList, ObservationsList, AISummaryBox, RiskFlagsSection
+├── services/api.ts       # fetchDashboard(id) → calls backend
+└── types/dashboard.ts    # Mirrors backend output types
+```
+
+## FHIR Boundaries
+
+- **Never invent FHIR field names.** Always verify against the actual HAPI FHIR response or the FHIR R4 spec before accessing nested fields.
+- **Always handle missing/malformed FHIR fields.** Use safe access (`?.`) and provide fallback defaults. FHIR resources often have optional or absent fields — never assume a field exists.
+- **Do not hard-code FHIR resource structures from memory.** If unsure about a field path (e.g. `name[0].given[0]`), check the FHIR R4 resource definition or test against the live HAPI server first.
+- **`fhirClient.ts` is the only file that touches HAPI FHIR.** No other file should import axios or make HTTP calls to the FHIR server.
+
+## Coding Rules
+
+- **Minimum diff only.** When implementing a feature or fixing a bug, make only the minimum code changes required. Never modify unrelated code.
+- **Trace integrity.** Before every change, verify that the implementation doesn't break any other part of the service chain (`fhirClient → transformer → riskRules → summary → route`).
+- **Type safety end-to-end.** Frontend `dashboard.ts` types must always mirror backend `dashboard.ts` types. If you change one, change the other.
+- **No `any` types.** Always use explicit TypeScript interfaces. Raw FHIR data uses `fhir.ts` types; clean output uses `dashboard.ts` types.
+- **Fallbacks are mandatory.** Every transformer function must have a safe default (e.g. `name ?? 'Unknown'`, `value ?? 0`). Never let a missing FHIR field crash the app.
+- **Summary resilience.** `summary.ts` must always return a string — if Groq fails, the rule-based fallback runs silently. Never throw from the summary service.
+- **Risk flags are pure.** `riskRules.ts` is sync, has no external calls, and no side effects. Rules live in config arrays, not if/else chains.
+- **Single endpoint.** The backend exposes only `GET /api/patients/:id/dashboard`. Do not add new endpoints without explicit approval.
+- **CORS enabled.** Backend must allow cross-origin requests from the frontend dev server.
+
+## Response Contract
+
+The dashboard endpoint always returns this shape:
+
+```json
+{
+  "patient": { "id", "name", "gender", "birthDate" },
+  "conditions": [{ "id", "display", "status", "onsetDate" }],
+  "observations": [{ "id", "display", "value", "unit", "effectiveDate" }],
+  "summary": "string (always present)",
+  "flags": [{ "type", "severity", "message" }]
+}
+```
+
+- `summary` is always a string — AI-generated or rule-based
+- `flags` is always an array — empty `[]` means no risks
+- `severity` is one of: `HIGH`, `MEDIUM`, `LOW`
