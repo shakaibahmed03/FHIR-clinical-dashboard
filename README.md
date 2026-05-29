@@ -1,4 +1,4 @@
-Clinical Dashboard Prototype
+## Clinical Dashboard Prototype
 
 A lightweight clinical dashboard for primary care physicians. The clinician enters a patient ID and gets a unified view of the patient's demographics, conditions, recent observations, an AI-generated clinical summary, and color-coded risk flags grounded in real clinical guidelines.
 
