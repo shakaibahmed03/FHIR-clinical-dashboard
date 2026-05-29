@@ -2,9 +2,6 @@
 
 A lightweight clinical dashboard for primary care physicians. The clinician enters a patient ID and gets a unified view of the patient's demographics, conditions, recent observations, an AI-generated clinical summary, and color-coded risk flags grounded in real clinical guidelines.
 
-Built as a take-home assignment for the Solutions Engineer Co-op role at Layer Health.
-
----
 
 ## Quick Demo
 
