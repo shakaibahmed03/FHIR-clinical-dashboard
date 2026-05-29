@@ -299,6 +299,6 @@ The reflection in `prompts/reflection/reflection_prompts.md` goes into more deta
 
 This is a **prototype**, not production code. It doesn't have authentication, HIPAA controls, real EHR integration, or test coverage. I made these omissions deliberately because the take-home is 2–3 hours of work and the goal is demonstrating engineering judgment on architecture, clinical reasoning, and AI collaboration — not building a hospital-grade product.
 
-If a Layer Health engineer wanted to extend this into something real, the boundaries are clean: the adapter pattern in the backend means data sources can be swapped without touching the frontend, the risk-rules module is pure functions easy to unit-test and extend, and the AI summary has both a real-LLM path and a fallback so it's never a single point of failure. The shape is meant to grow.
+If an engineer wanted to extend this into something real, the boundaries are clean: the adapter pattern in the backend means data sources can be swapped without touching the frontend, the risk-rules module is pure functions easy to unit-test and extend, and the AI summary has both a real-LLM path and a fallback so it's never a single point of failure.
 
-Thanks for reviewing this — happy to walk through any part of it in the follow-up.
+Thanks for reviewing this.
